@@ -1,6 +1,6 @@
 Metadata-Version: 2.2
-Name: ezmail
-Version: 2.0.1
+Name: py-ezmail
+Version: 2.0.2
 Summary: Send and read emails easily — with attachments, inline images, HTML templates, and OAuth2 authentication.
 Author-email: Luiz Henrique Brunca <luizhenriquebrunca@gmail.com>
 License: MIT
