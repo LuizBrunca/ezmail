@@ -1,6 +1,6 @@
 Metadata-Version: 2.2
 Name: ezmail
-Version: 2.0.0
+Version: 2.0.1
 Summary: Send and read emails easily — with attachments, inline images, HTML templates, and OAuth2 authentication.
 Author-email: Luiz Henrique Brunca <luizhenriquebrunca@gmail.com>
 License: MIT
@@ -165,4 +165,4 @@ MIT © [Luiz Henrique Brunca](https://github.com/luizbrunca)
 
 ## 🌎 Other Languages
 
-* 🇧🇷 **[Leia em Português (README.pt-BR.md)](README.pt-BR.md)**
+* 🇧🇷 **[Leia em Português (README.pt-BR.md)](https://github.com/LuizBrunca/ezmail/blob/main/README.pt-BR.md)**

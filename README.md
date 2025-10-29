@@ -141,4 +141,4 @@ MIT © [Luiz Henrique Brunca](https://github.com/luizbrunca)
 
 ## 🌎 Other Languages
 
-* 🇧🇷 **[Leia em Português (README.pt-BR.md)](README.pt-BR.md)**
+* 🇧🇷 **[Leia em Português (README.pt-BR.md)](https://github.com/LuizBrunca/ezmail/blob/main/README.pt-BR.md)**
