@@ -1,3 +1,27 @@
+Metadata-Version: 2.2
+Name: ezmail
+Version: 2.0.0
+Summary: Send and read emails easily — with attachments, inline images, HTML templates, and OAuth2 authentication.
+Author-email: Luiz Henrique Brunca <luizhenriquebrunca@gmail.com>
+License: MIT
+Project-URL: Homepage, https://github.com/luizbrunca/ezmail
+Project-URL: Repository, https://github.com/luizbrunca/ezmail
+Project-URL: Issues, https://github.com/luizbrunca/ezmail/issues
+Project-URL: Documentation, https://github.com/luizbrunca/ezmail#readme
+Keywords: email,smtp,imap,html,oauth2,anexos,automação,brunca,ezmail
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Topic :: Communications :: Email
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: jinja2>=3.0.0
+
 # 📧 EzMail
 
 **Send and read emails easily — with attachments, inline images, HTML templates, and OAuth2 authentication.**

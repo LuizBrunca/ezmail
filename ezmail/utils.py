@@ -53,25 +53,26 @@ def validate_image(image_path: str) -> None:
     """
     validate_path(image_path)
 
-def validate_smtp(smtp: dict) -> None:
-    """Validates whether the provided SMTP configuration dictionary is valid.
+def validate_protocol_config(protocol_config: dict) -> None:
+    """Validates whether the provided protocol configuration dictionary is valid.
 
     Args:
-        smtp (dict): Dictionary containing SMTP configuration.
+        protocol_config (dict): Dictionary containing server configuration.
             Must include the keys:
-                - 'server' (str): SMTP server hostname or IP.
+                - 'server' (str): server hostname or IP.
                 - 'port' (int): Port number for the SMTP connection.
 
     Raises:
         ValueError: If the dictionary is missing or required keys are not provided.
 
     Example:
-        validate_smtp({"server": "smtp.domain.com", "port": 587})
+        validate_server_dict({"server": "smtp.domain.com", "port": 587})
+        validate_server_dict({"server": "imap.domain.com", "port": 993})
     """
-    if not smtp:
-        raise ValueError("The 'smtp' dictionary does not exist.")
+    if not protocol_config:
+        raise ValueError("The protocol configuration dictionary does not exist.")
 
-    if not smtp.get("server") or not smtp.get("port"):
+    if not protocol_config.get("server") or not protocol_config.get("port"):
         raise ValueError("The keys 'server' and 'port' must be provided.")
 
 def validate_sender(sender: dict) -> None:
@@ -87,10 +88,32 @@ def validate_sender(sender: dict) -> None:
         ValueError: If the dictionary is missing or required keys are not provided.
 
     Example:
-        validate_smtp({"email": "email@domain.com", "password": "1234"})
+        validate_sender({"email": "email@domain.com", "password": "1234"})
     """
     if not sender:
         raise ValueError("The 'sender' dictionary does not exist.")
 
     if not sender.get("email") or not sender.get("password"):
         raise ValueError("The keys 'email' and 'password' must be provided.")
+
+def validate_account(account: dict) -> None:
+    """Validates whether the provided account credentials dictionary is valid.
+
+    Args:
+        account (dict): Dictionary containing email account credentials.
+            Must include the keys:
+                - 'email' (str): Email address.
+                - 'auth_value' (str): Password or OAuth2 token.
+                - 'auth_type' (str): 'password' or 'oauth2'.
+
+    Raises:
+        ValueError: If the dictionary is missing or required keys are not provided.
+
+    Example:
+        validate_account({"email": "email@domain.com", "auth_value": "1234", "auth_type": "password"})
+    """
+    if not account:
+        raise ValueError("The 'account' dictionary does not exist.")
+
+    if not account.get("email") or not account.get("auth_value") or not account.get("auth_type"):
+        raise ValueError("The keys 'email', 'auth_value' and 'auth_type' must be provided.")

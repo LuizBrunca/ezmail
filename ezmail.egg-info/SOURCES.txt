@@ -1,0 +1,14 @@
+LICENSE
+MANIFEST.in
+README.md
+README.pt-BR.md
+pyproject.toml
+setup.cfg
+ezmail/__init__.py
+ezmail/core.py
+ezmail/utils.py
+ezmail.egg-info/PKG-INFO
+ezmail.egg-info/SOURCES.txt
+ezmail.egg-info/dependency_links.txt
+ezmail.egg-info/requires.txt
+ezmail.egg-info/top_level.txt

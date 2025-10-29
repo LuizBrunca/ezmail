@@ -21,6 +21,6 @@ Example:
     ez.send("recipient@domain.com")
 """
 
-from .core import Ezmail
+from .core import EzSender, EzReader, EzMail
 
-__all__ = ["Ezmail"]
+__all__ = ["EzSender", "EzReader", "EzMail"]
