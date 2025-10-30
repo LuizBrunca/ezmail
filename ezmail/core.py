@@ -3,9 +3,9 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 from email.mime.image import MIMEImage
+from email.mime.audio import MIMEAudio
 from email import message_from_bytes
 from email.header import decode_header
-from email.utils import encode_rfc2231
 from mimetypes import guess_type
 from uuid import uuid4
 from os.path import isfile, basename
@@ -289,16 +289,19 @@ class EzSender:
                             if isfile(attachment_path):
                                 with open(attachment_path, "rb") as f:
                                     file_name = basename(attachment_path)
-                                    mime_attachment = MIMEApplication(f.read(), Name=file_name)
-                                    try:
-                                        file_name.encode("ascii")
-                                        mime_attachment.add_header("Content-Disposition", "attachment", filename=file_name)
-                                    except UnicodeEncodeError:
-                                        mime_attachment.add_header(
-                                            "Content-Disposition",
-                                            "attachment",
-                                            filename=("utf-8", "", encode_rfc2231(file_name, "utf-8"))
-                                        )
+                                    mime_type, _ = guess_type(attachment_path)
+                                    main_type, sub_type = (mime_type.split("/", 1) if mime_type else ("application", "octet-stream"))
+
+                                    if main_type == "text":
+                                        mime_attachment = MIMEText(f.read().decode("utf-8", errors="ignore"), _subtype=sub_type)
+                                    elif main_type == "image":
+                                        mime_attachment = MIMEImage(f.read(), _subtype=sub_type)
+                                    elif main_type == "audio":
+                                        mime_attachment = MIMEAudio(f.read(), _subtype=sub_type)
+                                    else:
+                                        mime_attachment = MIMEApplication(f.read(), _subtype=sub_type)
+
+                                    mime_attachment.add_header("Content-Disposition", "attachment", filename=file_name)
                                     message.attach(mime_attachment)
 
                         smtp.sendmail(
