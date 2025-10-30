@@ -1,4 +1,5 @@
 from os.path import isfile
+from datetime import datetime
 
 
 def validate_path(path: str) -> None:
@@ -117,3 +118,7 @@ def validate_account(account: dict) -> None:
 
     if not account.get("email") or not account.get("auth_value") or not account.get("auth_type"):
         raise ValueError("The keys 'email', 'auth_value' and 'auth_type' must be provided.")
+
+def validate_date(date):
+    if not isinstance(date, datetime):
+        raise ValueError("The date must be a datetime object.")

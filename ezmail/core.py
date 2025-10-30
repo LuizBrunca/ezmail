@@ -6,6 +6,7 @@ from email.mime.image import MIMEImage
 from email.mime.audio import MIMEAudio
 from email import message_from_bytes
 from email.header import decode_header
+from email.utils import parsedate_to_datetime
 from mimetypes import guess_type
 from uuid import uuid4
 from os.path import isfile, basename
@@ -17,7 +18,7 @@ from imaplib import IMAP4_SSL
 from base64 import b64encode
 from typing import List, Dict, Any
 from datetime import datetime
-from .utils import validate_template, validate_image, validate_path, validate_sender, validate_protocol_config, validate_account
+from .utils import validate_template, validate_image, validate_path, validate_sender, validate_protocol_config, validate_account, validate_date
 
 
 class EzSender:
@@ -518,11 +519,14 @@ class EzReader:
         if body:
             criteria += f' BODY "{body}"'
         if date:
-            criteria += f' ON {date}'
+            validate_date(date)
+            criteria += f' ON {date.strftime("%d-%b-%Y")}'
         if since:
-            criteria += f' SINCE {since}'
+            validate_date(since)
+            criteria += f' SINCE {since.strftime("%d-%b-%Y")}'
         if before:
-            criteria += f' BEFORE {before}'
+            validate_date(before)
+            criteria += f' BEFORE {before.strftime("%d-%b-%Y")}'
         criteria += ")"
 
         try:
@@ -554,6 +558,13 @@ class EzReader:
                 sender_decoded = msg.get("From", "")
                 body_content = ""
                 attachments = []
+                
+                # 🔹 Extrai e converte a data
+                raw_date = msg.get("Date")
+                try:
+                    email_date = parsedate_to_datetime(raw_date) if raw_date else None
+                except Exception:
+                    email_date = None
 
                 # Walk through all parts of the message
                 for part in msg.walk():
@@ -587,7 +598,8 @@ class EzReader:
                     sender=sender_decoded,
                     subject=subject_decoded,
                     body=body_content.strip(),
-                    attachments=attachments
+                    attachments=attachments,
+                    date=email_date
                 ))
 
             return emails
