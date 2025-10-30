@@ -5,6 +5,7 @@ from email.mime.application import MIMEApplication
 from email.mime.image import MIMEImage
 from email import message_from_bytes
 from email.header import decode_header
+from email.utils import encode_rfc2231
 from mimetypes import guess_type
 from uuid import uuid4
 from os.path import isfile, basename
@@ -288,12 +289,16 @@ class EzSender:
                             if isfile(attachment_path):
                                 with open(attachment_path, "rb") as f:
                                     file_name = basename(attachment_path)
-                                    mime_attachment = MIMEApplication(
-                                        f.read(), Name=file_name
-                                    )
-                                    mime_attachment["Content-Disposition"] = (
-                                        f'attachment; filename="{file_name}"'
-                                    )
+                                    mime_attachment = MIMEApplication(f.read(), Name=file_name)
+                                    try:
+                                        file_name.encode("ascii")
+                                        mime_attachment.add_header("Content-Disposition", "attachment", filename=file_name)
+                                    except UnicodeEncodeError:
+                                        mime_attachment.add_header(
+                                            "Content-Disposition",
+                                            "attachment",
+                                            filename=("utf-8", "", encode_rfc2231(file_name, "utf-8"))
+                                        )
                                     message.attach(mime_attachment)
 
                         smtp.sendmail(
