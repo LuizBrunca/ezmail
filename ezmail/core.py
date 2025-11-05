@@ -49,6 +49,7 @@ class EzSender:
             sender (dict): Sender credentials with keys:
                 - `email` (str): Sender email address.
                 - `password` (str): Sender email password.
+            max_emails_per_hour (int): Max number of emails sents per hour.
         """
         validate_protocol_config(smtp)
         validate_sender(sender)
