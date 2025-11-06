@@ -292,6 +292,8 @@ class EzReader:
                             })
                         except Exception:
                             continue
+                
+                uid = msg_id.decode() if isinstance(msg_id, bytes) else str(msg_id)
 
                 emails.append(EzMail(
                     uid=msg_id,
