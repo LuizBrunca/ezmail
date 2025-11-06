@@ -10,38 +10,32 @@ from .ezmail import EzMail
 
 
 class EzReader:
-    """Handles reading and managing emails via the IMAP protocol.
+    """High-level IMAP client for reading and managing emails.
 
-    This class provides a unified and extensible interface for connecting to
-    an IMAP server using either traditional password authentication or OAuth2
-    access tokens. It allows listing mailboxes, fetching unread emails, and
-    reading message details.
+    Provides a unified interface to connect to an IMAP server (password or OAuth2),
+    list mailboxes, search/filter messages, fetch contents and attachments, and
+    perform common management operations (mark as unread, move, delete, empty folders).
 
     Example:
         imap = {"server": "imap.gmail.com", "port": 993}
-        account = {
-            "email": "user@gmail.com",
-            "auth_value": "SENHA_OU_TOKEN",
-            "auth_type": "password"
-        }
-
-        reader = EzReader(imap, account)
-        reader.connect()
-        emails = reader.fetch_unread(limit=5)
-        reader.disconnect()
+        account = {"email": "user@gmail.com", "auth_value": "TOKEN_OR_PASSWORD", "auth_type": "oauth2"}
+        with EzReader(imap, account) as reader:
+            emails = reader.fetch_unread(limit=5)
+            for mail in emails:
+                print(mail.subject)
     """
 
     def __init__(self, imap: dict, account: dict):
-        """Initializes the EzReader instance with IMAP and authentication details.
+        """Initialize the EzReader with IMAP and authentication details.
 
         Args:
-            imap (dict): IMAP configuration with keys:
-                - `server` (str): IMAP server hostname or IP.
-                - `port` (int): IMAP port number (default: 993).
-            account (dict): Email credentials with keys:
-                - `email` (str): Email address to connect with.
-                - `auth_value` (str): Password or OAuth2 access token.
-                - `auth_type` (str): "password" or "oauth2".
+            imap (dict): IMAP config with:
+                - server (str): IMAP hostname or IP.
+                - port (int): IMAP port (usually 993 for SSL).
+            account (dict): Credentials with:
+                - email (str): Account email address.
+                - auth_value (str): Password or OAuth2 access token.
+                - auth_type (str): "password" or "oauth2".
 
         Raises:
             ValueError: If required parameters are missing or invalid.
@@ -51,59 +45,47 @@ class EzReader:
 
         self.imap_server = imap["server"]
         self.imap_port = imap["port"]
-        
+
         self.user_email = account["email"]
         self.auth_value = account["auth_value"]
         self.auth_type = account["auth_type"]
 
         self.mail = None
-    
-    def __enter__(self):
-        """Enables usage of EzReader as a context manager.
 
-        Automatically connects to the IMAP server when entering the context.
+    def __enter__(self):
+        """Enable context manager usage.
 
         Returns:
-            EzReader: The active EzReader instance, ready for operations.
-
-        Example:
-            >>> with EzReader(imap, account) as reader:
-            ...     emails = reader.fetch_unread()
-            ...     print(emails)
+            EzReader: The connected instance ready for operations.
         """
         self.connect()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        """Ensures IMAP disconnection when leaving the context.
-
-        This method is automatically called at the end of a `with` block,
-        even if an exception occurs inside it.
-        """
+        """Ensure IMAP disconnection when leaving the context."""
         self.disconnect()
 
     def _generate_oauth2_string(self, user_email: str, access_token: str) -> bytes:
-        """Generates the IMAP OAuth2 authentication string.
+        """Build the XOAUTH2 auth string for IMAP.
 
         Args:
-            user_email (str): Email address of the user.
-            access_token (str): OAuth2 access token.
+            user_email (str): The user email.
+            access_token (str): OAuth2 bearer token.
 
         Returns:
-            bytes: Encoded OAuth2 authentication string.
+            bytes: Encoded XOAUTH2 string.
         """
         auth_string = f"user={user_email}\1auth=Bearer {access_token}\1\1"
         return b64encode(auth_string.encode("utf-8"))
 
     def connect(self) -> None:
-        """Establishes an authenticated IMAP connection.
+        """Establish a secure IMAP connection and authenticate.
 
-        This method connects securely via SSL and authenticates using either
-        password or OAuth2 token based on the chosen authentication type.
+        Authenticates with either password or OAuth2 depending on `auth_type`.
 
         Raises:
-            RuntimeError: If connection or authentication fails.
-            ValueError: If the authentication type is invalid.
+            RuntimeError: On connection/authentication failure.
+            ValueError: If `auth_type` is not "password" or "oauth2".
         """
         try:
             self.mail = IMAP4_SSL(self.imap_server, self.imap_port)
@@ -118,13 +100,9 @@ class EzReader:
 
         except Exception as e:
             raise RuntimeError(f"Failed to connect or authenticate to IMAP server: {e}")
-    
-    def disconnect(self) -> None:
-        """Closes the IMAP connection safely.
 
-        Example:
-            disconnect()
-        """
+    def disconnect(self) -> None:
+        """Close the IMAP connection safely."""
         try:
             if self.mail:
                 self.mail.logout()
@@ -132,13 +110,13 @@ class EzReader:
             pass
 
     def list_mailboxes(self) -> List[str]:
-        """Lists all available mailboxes (folders) for the connected account.
+        """List all available mailboxes (folders).
 
         Returns:
-            List[str]: List of mailbox names.
+            List[str]: Mailbox names as returned by the server (decoded).
 
         Raises:
-            RuntimeError: If unable to list mailboxes or not connected.
+            RuntimeError: If not connected or unable to list mailboxes.
         """
         if not self.mail:
             raise RuntimeError("Not connected to any IMAP server.")
@@ -150,7 +128,60 @@ class EzReader:
             return [box.decode().split(' "/" ')[-1] for box in mailboxes]
         except Exception as e:
             raise RuntimeError(f"Failed to list mailboxes: {e}")
-    
+
+    def _quote_mailbox(self, name: str) -> str:
+        """Quote a mailbox name if it contains special characters.
+
+        Quotes names containing spaces, dots, slashes or brackets to avoid IMAP
+        parser errors (e.g., "INBOX.Trash", "Deleted Items").
+
+        Args:
+            name (str): Raw mailbox name.
+
+        Returns:
+            str: Possibly quoted mailbox name, safe for IMAP commands.
+        """
+        if not name:
+            return name
+        n = name.strip().strip('"').strip("'")
+        if any(ch in n for ch in [' ', '.', '/', '[', ']', '(', ')']):
+            return f'"{n}"'
+        return n
+
+    def _list_mailboxes_detailed(self):
+        """Return parsed IMAP LIST entries including attributes and delimiter.
+
+        Returns:
+            list[tuple[set[str], str, str]]: A list of (attributes, delimiter, name).
+
+        Raises:
+            RuntimeError: If not connected or list fails.
+        """
+        if not self.mail:
+            raise RuntimeError("Not connected to any IMAP server.")
+        status, lines = self.mail.list()
+        if status != "OK":
+            raise RuntimeError("Unable to retrieve mailbox list.")
+        parsed = []
+        for raw in lines or []:
+            s = raw.decode(errors="ignore")
+            # Format: (<attrs>) "delim" name
+            left = s.find("(")
+            right = s.find(")")
+            attrs = set()
+            if left != -1 and right != -1 and right > left:
+                attrs = set(a.strip() for a in s[left + 1:right].split() if a.strip())
+            rest = s[right + 1:].strip()
+            delim = None
+            if rest.startswith('"'):
+                delim_end = rest.find('"', 1)
+                if delim_end != -1:
+                    delim = rest[1:delim_end]
+                    rest = rest[delim_end + 1:].strip()
+            name = rest.strip().strip('"')
+            parsed.append((attrs, delim or "/", name))
+        return parsed
+
     def fetch_messages(
         self,
         mailbox: str = "INBOX",
@@ -160,54 +191,48 @@ class EzReader:
         subject: str | None = None,
         text: str | None = None,
         body: str | None = None,
-        date: str | None = None,
-        since: str | None = None,
-        before: str | None = None,
+        date: datetime | None = None,
+        since: datetime | None = None,
+        before: datetime | None = None,
     ) -> List[EzMail]:
-        """Lists and retrieves emails from the specified mailbox using flexible IMAP filters.
+        """Search and fetch messages with flexible IMAP filters.
 
-        This method provides a generalized way to search and fetch emails with multiple
-        optional filters such as status (`ALL`, `SEEN`, `UNSEEN`), sender, subject, text,
-        body content, or date-based constraints (`SINCE`, `BEFORE`, `ON`).
-
-        Each message is returned as an `EzMail` instance, which includes metadata,
-        message content, and attachments loaded in memory (not saved to disk).
+        Performs a UID-based search in the selected mailbox and fetches
+        message contents without marking them as seen. Returns `EzMail`
+        objects with metadata, plain-text body and in-memory attachments.
 
         Args:
-            mailbox (str, optional): Mailbox (folder) name to search. Defaults to `"INBOX"`.
-            limit (int | None, optional): Maximum number of emails to fetch. Defaults to `None`.
-            status (str, optional): IMAP status filter, e.g., `"ALL"`, `"UNSEEN"`, or `"SEEN"`. Defaults to `"ALL"`.
-            sender (str, optional): Filters emails from a specific sender. Defaults to `None`.
-            subject (str, optional): Filters emails containing the given subject text. Defaults to `None`.
-            text (str, optional): Searches for a keyword in the subject and body. Defaults to `None`.
-            body (str, optional): Searches for a keyword only in the message body. Defaults to `None`.
-            date (str, optional): Fetches emails from a specific date (`"DD-MMM-YYYY"`). Defaults to `None`.
-            since (str, optional): Fetches emails sent on or after a date (`"DD-MMM-YYYY"`). Defaults to `None`.
-            before (str, optional): Fetches emails sent before a date (`"DD-MMM-YYYY"`). Defaults to `None`.
+            mailbox (str, optional): Source mailbox to search. Defaults to "INBOX".
+            limit (int | None, optional): Max number of emails to fetch. Defaults to None.
+            status (str, optional): IMAP status filter ("ALL", "UNSEEN", "SEEN"). Defaults to "ALL".
+            sender (str | None, optional): Filter by From header (substring match).
+            subject (str | None, optional): Filter by subject text.
+            text (str | None, optional): Search keyword in subject or body.
+            body (str | None, optional): Search keyword only in body.
+            date (datetime | None, optional): Exact date to match (ON).
+            since (datetime | None, optional): Lower bound date (SINCE).
+            before (datetime | None, optional): Upper bound (exclusive) date (BEFORE).
 
         Returns:
-            list[EzMail]: A list of `EzMail` objects containing:
-                - `uid` (int): UID.
-                - `sender` (str): Sender's name and address.
-                - `subject` (str): Email subject (decoded).
-                - `body` (str): Plain text body of the message.
-                - `attachments` (list): List of attachments (not saved), each with:
-                    - `filename` (str): File name.
-                    - `content_type` (str): MIME type.
-                    - `data` (bytes): Raw binary content.
+            List[EzMail]: Messages with:
+                - uid (str): IMAP UID.
+                - sender (str): Raw "From" header.
+                - subject (str): Decoded subject.
+                - body (str): Plain-text body (if present).
+                - attachments (list[dict]): In-memory attachments (filename, content_type, data).
+                - date (datetime | None): Parsed Date header.
 
         Raises:
-            RuntimeError: If not connected, search fails, or message parsing fails.
+            RuntimeError: If not connected, search fails, or parsing fails.
 
         Example:
-            >>> emails = reader.fetch_messages(status="UNSEEN", since="01-Oct-2025")
-            >>> for mail in emails:
-            ...     print(mail.subject, len(mail.attachments))
+            >>> emails = reader.fetch_messages(status="UNSEEN")
+            >>> print(len(emails))
         """
         if not self.mail:
             raise RuntimeError("Not connected to any IMAP server.")
 
-        # Build IMAP search criteria dynamically
+        # Build IMAP search criteria
         criteria = f"({status}"
         if sender:
             criteria += f' FROM "{sender}"'
@@ -230,57 +255,50 @@ class EzReader:
 
         try:
             self.mail.select(mailbox)
-            status_code, data = self.mail.search(None, criteria)
 
+            # UID search (reliable across expunges)
+            status_code, data = self.mail.uid("SEARCH", None, criteria)
             if status_code != "OK":
                 raise RuntimeError(f"Failed to search emails with criteria: {criteria}")
 
-            ids = data[0].split()
+            uids = (data[0] or b"").split()
             if limit:
-                ids = ids[:limit]
+                uids = uids[:limit]
 
             emails = []
-            for msg_id in ids:
-                status_fetch, msg_data = self.mail.fetch(msg_id, "(RFC822)")
-                if status_fetch != "OK" or not msg_data:
+            for uid in uids:
+                uid_str = uid.decode()
+
+                # Do not set \Seen bit
+                status_fetch, msg_data = self.mail.uid("FETCH", uid_str, "(BODY.PEEK[])")
+                if status_fetch != "OK" or not msg_data or not msg_data[0]:
                     continue
 
                 msg = message_from_bytes(msg_data[0][1])
 
-                # Decode subject
-                subject_raw, enc = decode_header(msg["Subject"] or "")[0]
-                if isinstance(subject_raw, bytes):
-                    subject_decoded = subject_raw.decode(enc or "utf-8", errors="ignore")
-                else:
-                    subject_decoded = subject_raw
+                # Subject
+                subject_raw, enc = decode_header(msg.get("Subject", ""))[0]
+                subject_decoded = subject_raw.decode(enc or "utf-8", errors="ignore") if isinstance(subject_raw, bytes) else subject_raw
 
                 sender_decoded = msg.get("From", "")
-                body_content = ""
-                attachments = []
-                
-                # 🔹 Extrai e converte a data
+                body_content, attachments = "", []
+
                 raw_date = msg.get("Date")
                 try:
                     email_date = parsedate_to_datetime(raw_date) if raw_date else None
                 except Exception:
                     email_date = None
 
-                # Walk through all parts of the message
                 for part in msg.walk():
                     content_disposition = str(part.get("Content-Disposition", "")).lower()
                     content_type = part.get_content_type()
-
                     if part.is_multipart():
                         continue
-
-                    # Body (text/plain)
                     if content_type == "text/plain" and "attachment" not in content_disposition:
                         try:
                             body_content = part.get_payload(decode=True).decode(errors="ignore")
                         except Exception:
-                            continue
-
-                    # Attachment
+                            pass
                     filename = part.get_filename()
                     if filename:
                         try:
@@ -291,328 +309,298 @@ class EzReader:
                                 "data": file_data,
                             })
                         except Exception:
-                            continue
-                
-                uid = msg_id.decode() if isinstance(msg_id, bytes) else str(msg_id)
+                            pass
 
                 emails.append(EzMail(
-                    uid=msg_id,
+                    uid=uid_str,
                     sender=sender_decoded,
                     subject=subject_decoded,
                     body=body_content.strip(),
                     attachments=attachments,
                     date=email_date
                 ))
-
             return emails
 
         except Exception as e:
             raise RuntimeError(f"Failed to fetch emails with the criteria {criteria}: {e}")
 
-    def fetch_unread(self, mailbox: str = "INBOX", limit: int | None = None) -> List[Dict[str, Any]]:
-        """Fetches unread emails from the specified mailbox.
+    def fetch_unread(self, mailbox: str = "INBOX", limit: int | None = None) -> List[EzMail]:
+        """Convenience method to fetch unread messages.
 
         Args:
-            mailbox (str): Mailbox to fetch from (default: "INBOX").
-            limit (int, optional): Maximum number of emails to retrieve.
+            mailbox (str): Mailbox to fetch from. Defaults to "INBOX".
+            limit (int | None): Optional maximum number of messages.
 
         Returns:
-            list[EzMail]: A list of `EzMail` objects containing:
-                - `uid` (int): UID.
-                - `sender` (str): Sender's name and address.
-                - `subject` (str): Email subject (decoded).
-                - `body` (str): Plain text body of the message.
-                - `attachments` (list): List of attachments (not saved), each with:
-                    - `filename` (str): File name.
-                    - `content_type` (str): MIME type.
-                    - `data` (bytes): Raw binary content.
+            List[EzMail]: Unread messages as `EzMail` objects.
 
         Raises:
-            RuntimeError: If unable to fetch emails or not connected.
+            RuntimeError: If not connected or on fetch errors.
         """
+        return self.fetch_messages(mailbox=mailbox, status="UNSEEN", limit=limit)
 
-        emails = self.fetch_messages(mailbox=mailbox, status="UNSEEN", limit=limit)
-        return emails
-    
     def mark_as_unread(self, email: EzMail, mailbox: str = "INBOX") -> bool:
-        """Marks an EzMail message as unread (removes the \\Seen flag).
-
-        This method reverts the read status of a given email by removing its
-        `\\Seen` flag, effectively marking it as unread. The UID is extracted
-        automatically from the provided `EzMail` instance.
+        """Remove the ``\\Seen`` flag (mark message as unread).
 
         Args:
-            email (EzMail): The EzMail instance representing the email to modify.
-                The UID is obtained from `email.uid`.
-            mailbox (str, optional): The mailbox (folder) containing the email.
-                Defaults to "INBOX".
+            email (EzMail): Message to modify (its UID is taken from `email.uid`).
+            mailbox (str): Mailbox containing the message. Defaults to "INBOX".
 
         Returns:
-            bool: True if the operation was successful, False otherwise.
+            bool: True on success, False otherwise.
 
         Raises:
-            RuntimeError: If not connected to any IMAP server or if the command fails.
-
-        Example:
-            >>> mail = emails[0]
-            >>> reader.mark_as_unread(mail)
-            True
+            RuntimeError: If not connected or the IMAP command fails.
         """
         if not self.mail:
             raise RuntimeError("Not connected to any IMAP server.")
 
         try:
-            # Select the mailbox to operate on
             self.mail.select(mailbox)
-            
             uid = email.uid
-
-            # Execute the IMAP command to remove the \Seen flag
             status, _ = self.mail.uid("STORE", str(uid), "-FLAGS", "(\\Seen)")
-
             if status != "OK":
                 raise RuntimeError(f"Failed to mark message {email} as unread.")
-
             return True
-
         except Exception as e:
             print(f"❌ Error marking email {email} as unread: {e}")
             return False
     
-    def move_email(self, email: EzMail, destination: str, mailbox: str = "INBOX") -> bool:
-        """Moves an email (EzMail object) to another mailbox (folder).
-
-        This method moves the specified email to a different mailbox using its UID.
-        It first attempts to use the native IMAP `MOVE` command (RFC 6851) if supported
-        by the server. If not, it falls back to copying the message to the destination
-        folder, marking it as deleted in the source folder, and expunging it.
+    def mark_as_read(self, email: EzMail, mailbox: str = "INBOX") -> bool:
+        """Set the ``\\Seen`` flag (mark message as read).
 
         Args:
-            email (EzMail): The EzMail instance representing the message to move.
-                The method automatically retrieves its UID from `email.uid`.
-            destination (str): The target mailbox (folder) to move the message to.
-            mailbox (str, optional): The source mailbox containing the email.
-                Defaults to "INBOX".
+            email (EzMail): Message to modify (UID taken from `email.uid`).
+            mailbox (str): Mailbox containing the message. Defaults to "INBOX".
 
         Returns:
-            bool: True if the message was successfully moved, False otherwise.
+            bool: True on success, False otherwise.
 
         Raises:
-            RuntimeError: If not connected to an IMAP server or if the operation fails.
+            RuntimeError: If not connected or the IMAP command fails.
 
         Example:
             >>> mail = emails[0]
-            >>> reader.move_email(mail, "Archive")
+            >>> reader.mark_as_read(mail)
             True
         """
         if not self.mail:
             raise RuntimeError("Not connected to any IMAP server.")
 
         try:
-            # Select source mailbox
             self.mail.select(mailbox)
-            
-            uid = email.uid
+            uid = str(email.uid)
+            status, _ = self.mail.uid("STORE", uid, "+FLAGS", "(\\Seen)")
+            if status != "OK":
+                raise RuntimeError(f"Failed to mark message {email} as read.")
+            return True
+        except Exception as e:
+            print(f"❌ Error marking email {email} as read: {e}")
+            return False
 
-            # Check if server supports MOVE
-            capabilities = self.mail.capabilities
-            if "MOVE" in capabilities:
-                status, _ = self.mail.uid("MOVE", str(uid), destination)
+    def move_email(self, email: EzMail, destination: str, mailbox: str = "INBOX") -> bool:
+        """Move a message to another mailbox (folder).
+
+        Tries native `UID MOVE` (RFC 6851) if supported. Otherwise, falls back to
+        `UID COPY` + `UID STORE +FLAGS (\\Deleted)` + `EXPUNGE`.
+
+        Args:
+            email (EzMail): Message to move (UID from `email.uid`).
+            destination (str): Target mailbox name (e.g., "Archive", "INBOX.Trash").
+            mailbox (str): Source mailbox that currently contains the message. Defaults to "INBOX".
+
+        Returns:
+            bool: True if moved successfully, False otherwise.
+
+        Raises:
+            RuntimeError: If not connected or the operation fails.
+        """
+        if not self.mail:
+            raise RuntimeError("Not connected to any IMAP server.")
+        try:
+            self.mail.select(mailbox)
+            uid = str(email.uid)
+            dest = self._quote_mailbox(destination)
+
+            if "MOVE" in self.mail.capabilities:
+                status, _ = self.mail.uid("MOVE", uid, dest)
                 if status != "OK":
                     raise RuntimeError(f"Failed to move {email} to {destination}.")
             else:
-                # Fallback: COPY + DELETE + EXPUNGE
-                status_copy, _ = self.mail.uid("COPY", str(uid), destination)
+                status_copy, _ = self.mail.uid("COPY", uid, dest)
                 if status_copy != "OK":
                     raise RuntimeError(f"Failed to copy {email} to {destination}.")
-
-                # Mark as deleted and expunge
-                self.mail.uid("STORE", str(uid), "+FLAGS", "(\\Deleted)")
+                self.mail.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
                 self.mail.expunge()
-
             return True
-
         except Exception as e:
             print(f"❌ Error moving email {email} to {destination}: {e}")
             return False
-    
-    def move_to_trash(self, email: EzMail, mailbox: str = "INBOX") -> bool:
-        """Moves an EzMail message to the Trash folder.
 
-        This method moves the given email from its current mailbox to the
-        Trash folder using the existing `move_email()` method. It automatically
-        detects the appropriate Trash folder name based on the IMAP server.
+    def get_trash_folder(self) -> str:
+        """Detect the Trash folder across providers/languages/hierarchies.
 
-        Args:
-            email (EzMail): The EzMail instance representing the email to move.
-                The UID is obtained automatically from `email.uid`.
-            mailbox (str, optional): The source mailbox containing the email.
-                Defaults to "INBOX".
+        Strategy:
+          1) Prefer mailboxes flagged with ``\\Trash``.
+          2) Try multilingual name heuristics ("Trash", "Deleted Items", "Lixeira", etc.).
+          3) Gmail labels fallback (e.g., "[Gmail]/Lixeira" / "[Gmail]/Trash").
+          4) Common hierarchy fallback ("INBOX.Trash").
 
         Returns:
-            bool: True if the message was successfully moved to Trash, False otherwise.
+            str: The best candidate mailbox name for Trash (server’s native name).
 
         Raises:
-            RuntimeError: If not connected to an IMAP server or if the operation fails.
-
-        Example:
-            >>> mail = emails[0]
-            >>> reader.move_to_trash(mail)
-            True
+            RuntimeError: If not connected or listing fails.
         """
         if not self.mail:
             raise RuntimeError("Not connected to any IMAP server.")
 
+        boxes = self._list_mailboxes_detailed()
+        if not boxes:
+            return "INBOX.Trash"
+
+        # 1) \Trash attribute (most reliable)
+        for attrs, _, name in boxes:
+            if any(a.lower() == r'\trash' for a in attrs):
+                return name
+
+        # 2) Multilingual keywords
+        keywords = [
+            "trash", "deleted items", "deleted messages", "deleted",
+            "lixeira", "itens excluídos", "eliminados",
+            "papelera", "corbeille", "papierkorb", "cestino"
+        ]
+        names_lower = [(name, name.lower()) for _, _, name in boxes]
+        for kw in keywords:
+            for name, low in names_lower:
+                if kw in low:
+                    return name
+
+        # 3) Gmail labels (localized)
+        for name, low in names_lower:
+            if "[gmail]" in low and ("trash" in low or "lixeira" in low or "bin" in low):
+                return name
+
+        # 4) Hierarchy fallback
+        for name, low in names_lower:
+            if low.endswith("inbox.trash"):
+                return name
+
+        return "INBOX.Trash"
+
+    def move_to_trash(self, email: EzMail, mailbox: str = "INBOX") -> bool:
+        """Move a message to Trash in a provider-safe way.
+
+        For Gmail, applies label operations (remove ``\\Inbox`` and add ``\\Trash``)
+        using ``X-GM-LABELS``. For other servers, detects the Trash mailbox and uses
+        `move_email()` (or `copy+delete` fallback).
+
+        Args:
+            email (EzMail): Message to send to Trash (UID from `email.uid`).
+            mailbox (str): Source mailbox containing the message. Defaults to "INBOX".
+
+        Returns:
+            bool: True on success, False otherwise.
+
+        Raises:
+            RuntimeError: If not connected or on IMAP errors.
+        """
+        if not self.mail:
+            raise RuntimeError("Not connected to any IMAP server.")
         try:
-            # Common folder names for Trash
-            trash_folders = ["Trash", "Deleted Items", "Deleted Messages", "INBOX.Trash"]
-            trash_folder = None
+            server = (self.imap_server or "").lower()
+            uid = str(email.uid)
 
-            # Try to detect an existing trash folder
-            for folder in trash_folders:
-                status, _ = self.mail.list(pattern=folder)
-                if status == "OK":
-                    trash_folder = folder
-                    break
+            if "gmail" in server:
+                self.mail.select(mailbox)
+                self.mail.uid("STORE", uid, "-X-GM-LABELS", "(\\Inbox)")
+                self.mail.uid("STORE", uid, "+X-GM-LABELS", "(\\Trash)")
+                return True
 
-            # Default fallback
-            if not trash_folder:
-                trash_folder = "Trash"
-
-            # Use the existing move_email method
+            trash_folder = self.get_trash_folder()
             return self.move_email(email, destination=trash_folder, mailbox=mailbox)
 
         except Exception as e:
             print(f"❌ Error moving email {email} to Trash: {e}")
             return False
-    
-    def empty_folder(self, mailbox: str) -> bool:
-        """Permanently deletes all messages from the specified mailbox.
 
-        This method selects the given mailbox (folder), marks all messages inside it
-        with the `\\Deleted` flag, and performs an `EXPUNGE` operation to remove them
-        permanently from the server.
+    def empty_folder(self, mailbox: str) -> bool:
+        """Permanently delete all messages from a mailbox.
+
+        Marks every message in the given mailbox as ``\\Deleted`` and calls
+        ``EXPUNGE`` to remove them permanently.
 
         Args:
-            mailbox (str): The name of the mailbox (folder) to empty.
-                Example: "Trash", "Spam", or "INBOX.Archive".
+            mailbox (str): Mailbox name to empty (e.g., "Trash", "INBOX.Trash").
 
         Returns:
-            bool: True if the folder was successfully emptied, False otherwise.
+            bool: True if the folder was emptied successfully, False otherwise.
 
         Raises:
-            RuntimeError: If not connected to an IMAP server or if the operation fails.
-
-        Example:
-            >>> reader.empty_folder("Trash")
-            True
+            RuntimeError: If not connected or the mailbox cannot be opened.
         """
         if not self.mail:
             raise RuntimeError("Not connected to any IMAP server.")
 
         try:
-            # Select the mailbox to operate on
             status, _ = self.mail.select(mailbox)
             if status != "OK":
                 raise RuntimeError(f"Failed to open mailbox '{mailbox}'.")
-
-            # Mark all messages in the folder as deleted
             self.mail.store("1:*", "+FLAGS", "(\\Deleted)")
-
-            # Permanently remove deleted messages
             self.mail.expunge()
-
             return True
-
         except Exception as e:
             print(f"❌ Error emptying folder '{mailbox}': {e}")
             return False
 
     def empty_trash(self) -> bool:
-        """Permanently deletes all messages from the Trash folder.
+        """Permanently empty the Trash mailbox.
 
-        This method automatically detects the correct Trash mailbox name
-        (e.g., "Trash", "Deleted Items", or "INBOX.Trash") and permanently
-        deletes all messages inside it using the `empty_folder()` method.
+        Auto-detects the Trash folder name and reuses :meth:`empty_folder`.
 
         Returns:
-            bool: True if the Trash was successfully emptied, False otherwise.
+            bool: True if Trash was emptied successfully, False otherwise.
 
         Raises:
-            RuntimeError: If not connected to an IMAP server or if the operation fails.
-
-        Example:
-            >>> reader.empty_trash()
-            True
+            RuntimeError: If not connected or if the operation fails.
         """
         if not self.mail:
             raise RuntimeError("Not connected to any IMAP server.")
 
         try:
-            # Detect the correct Trash folder name
-            trash_folders = ["Trash", "Deleted Items", "Deleted Messages", "INBOX.Trash"]
-            trash_folder = None
-
-            for folder in trash_folders:
-                status, _ = self.mail.list(pattern=folder)
-                if status == "OK":
-                    trash_folder = folder
-                    break
-
-            if not trash_folder:
-                trash_folder = "Trash"
-
-            # Reuse the generic empty_folder() method
+            trash_folder = self.get_trash_folder()
             return self.empty_folder(trash_folder)
-
         except Exception as e:
             print(f"❌ Error emptying Trash folder: {e}")
             return False
-    
-    def delete_email(self, email: EzMail, mailbox: str = "INBOX") -> bool:
-        """Permanently deletes an EzMail message from the specified mailbox.
 
-        This method marks the given email as deleted using the IMAP `STORE` command
-        with the `+FLAGS (\\Deleted)` operation and immediately performs an `EXPUNGE`
-        to permanently remove it from the mailbox.
+    def delete_email(self, email: EzMail, mailbox: str = "INBOX") -> bool:
+        """Permanently delete a single message.
+
+        Marks the message with ``\\Deleted`` and immediately calls ``EXPUNGE`` to
+        remove it permanently from the selected mailbox.
 
         Args:
-            email (EzMail): The EzMail instance representing the email to delete.
-                The UID is obtained automatically from `email.uid`.
-            mailbox (str, optional): The mailbox (folder) containing the email.
-                Defaults to "INBOX".
+            email (EzMail): Message to delete (UID from `email.uid`).
+            mailbox (str): Mailbox containing the message. Defaults to "INBOX".
 
         Returns:
-            bool: True if the message was successfully and permanently deleted,
-            False otherwise.
+            bool: True if permanently deleted, False otherwise.
 
         Raises:
-            RuntimeError: If not connected to an IMAP server or if the command fails.
-
-        Example:
-            >>> mail = emails[0]
-            >>> reader.delete_email(mail)
-            True
+            RuntimeError: If not connected or if the IMAP command fails.
         """
         if not self.mail:
             raise RuntimeError("Not connected to any IMAP server.")
 
         try:
-            # Select the mailbox to operate on
             self.mail.select(mailbox)
-
             uid = email.uid
-
-            # Mark message as deleted
             status, _ = self.mail.uid("STORE", str(uid), "+FLAGS", "(\\Deleted)")
             if status != "OK":
                 raise RuntimeError(f"Failed to mark message {email} as deleted.")
-
-            # Permanently remove it if requested
             self.mail.expunge()
-
             return True
-
         except Exception as e:
             print(f"❌ Error deleting email {email}: {e}")
             return False

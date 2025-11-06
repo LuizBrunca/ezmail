@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py-ezmail"
-version = "2.2.1"
+version = "2.2.8"
 description = "Send and read emails easily — with attachments, inline images, IMAP management, and OAuth2 authentication."
 readme = "README.md"
 authors = [
