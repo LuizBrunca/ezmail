@@ -1,51 +1,59 @@
 # 📧 EzMail
 
-**Send and read emails easily — with attachments, inline images, HTML templates, and OAuth2 authentication.**
+**Send and read emails easily — with attachments, inline images, HTML templates, IMAP management, and OAuth2 authentication.**
 
-`ezmail` is a modern Python library that simplifies email automation.
-It allows you to **send and receive emails** via SMTP and IMAP, supporting advanced features such as inline images, HTML content, file attachments, and secure authentication (TLS or OAuth2).
+`ezmail` is a modern Python library that simplifies email automation and management.  
+It allows you to **send and receive emails** using SMTP and IMAP, supporting HTML templates, inline images, file attachments, and secure authentication (TLS/SSL or OAuth2).
 
 ---
 
 ## 🚀 Features
 
-### ✉️ Sending Emails (EzSender)
+### ✉️ Sending Emails (`EzSender`)
+- Send emails to one or multiple recipients  
+- Supports both **HTML** and **plain text** messages  
+- Embed **inline images** directly into the email body  
+- Attach any file type (`PDF`, `CSV`, `ZIP`, `XML`, etc.)  
+- Use **Jinja2 templates** for dynamic HTML emails  
+- Secure connection via **TLS/SSL**  
+- Optional hourly send rate limiting  
+- Full **context manager** support (`with EzSender(...) as ez:`)
 
-* Send emails to one or multiple recipients
-* Support for both **HTML** and **plain text** bodies
-* Add **inline images** directly into the message
-* Attach any type of file (`PDF`, `CSV`, `XML`, etc.)
-* Use **Jinja2 templates** for dynamic HTML emails
-* Secure connection using **TLS/SSL**
-* Optional hourly send rate limit
+### 📥 Reading Emails (`EzReader`)
+- Connect to any IMAP server using password or **OAuth2 token**  
+- List all available mailboxes (Inbox, Trash, Sent, etc.)  
+- Filter emails by `ALL`, `UNSEEN`, `SEEN`, `FROM`, `SUBJECT`, `TEXT`, `SINCE`, `BEFORE`  
+- Retrieve emails and attachments in memory (no file saving required)  
+- Mark as **unread**, **move**, **delete**, or **empty** folders (e.g., Trash)  
+- Full **context manager** support (`with EzReader(...) as reader:`)
 
-### 📥 Reading Emails (EzReader)
-
-* Connect via **IMAP** securely using password or **OAuth2 token**
-* List mailboxes (`INBOX`, `Sent`, `Drafts`, etc.)
-* Filter by: `ALL`, `UNSEEN`, `FROM`, `SUBJECT`, `TEXT`, `SINCE`, `BEFORE`
-* Retrieve **attachments in memory** (not saved automatically)
-* Return results as structured `EzMail` objects
+### 💌 Email Model (`EzMail`)
+- Represents an individual email message  
+- Provides access to:  
+  - `sender`, `subject`, `body`, `date`, and `attachments`  
+- Methods:  
+  - `has_attachments()` — checks if attachments exist  
+  - `summary()` — returns a short preview of the message body  
 
 ---
 
 ## 💻 Installation
 
 ```bash
-pip install ezmail
+pip install py-ezmail
 ```
 
-No extra configuration needed — just use your SMTP and IMAP credentials.
+No additional configuration is required — just provide your SMTP and IMAP credentials.
 
 ---
 
 ## 🧠 Quick Overview
 
 | Class      | Description                                                          |
-| ---------- | -------------------------------------------------------------------- |
+| -----------| -------------------------------------------------------------------- |
 | `EzSender` | Composes and sends emails with HTML, inline images, and attachments. |
-| `EzReader` | Reads and filters emails from any IMAP server.                       |
-| `EzMail`   | Represents a single email (sender, subject, body, attachments).      |
+| `EzReader` | Reads, filters, and manages emails from IMAP servers.                |
+| `EzMail`   | Represents a single email object (sender, subject, body, attachments).|
 
 ---
 
@@ -57,12 +65,13 @@ from ezmail import EzSender
 smtp = {"server": "smtp.gmail.com", "port": 587}
 sender = {"email": "me@gmail.com", "password": "app_password"}
 
-ez = EzSender(smtp, sender)
-ez.subject = "System Update Report"
-ez.add_text("<h2>Hello!</h2><p>The latest system report is attached below.</p>")
-ez.add_attachment("report.pdf")
+with EzSender(smtp, sender) as ez:
+    ez.subject = "System Update Report"
+    ez.add_text("<h2>Hello!</h2><p>The latest report is attached below.</p>")
+    ez.add_attachment("report.pdf")
+    result = ez.send(["client@example.com", "team@example.com"])
 
-ez.send(["client@example.com", "team@example.com"])
+print(result)
 ```
 
 ---
@@ -75,37 +84,47 @@ from ezmail import EzReader
 imap = {"server": "imap.gmail.com", "port": 993}
 account = {
     "email": "me@gmail.com",
-    "auth_value": "oauth2_token_or_password",
-    "auth_type": "password"  # or "oauth2"
+    "auth_value": "app_password",
+    "auth_type": "password"
 }
 
-reader = EzReader(imap, account)
-reader.connect()
-
-emails = reader.fetch_messages(status="UNSEEN", since="01-Oct-2025")
-for mail in emails:
-    print(mail.subject, "-", mail.sender)
-    if mail.has_attachments():
-        for a in mail.attachments:
-            print("💎", a["filename"], len(a["data"]), "bytes")
-
-reader.disconnect()
+with EzReader(imap, account) as reader:
+    emails = reader.fetch_unread(limit=5)
+    for mail in emails:
+        print(mail.subject, "-", mail.sender)
+        if mail.has_attachments():
+            for a in mail.attachments:
+                print("💎", a["filename"], len(a["data"]), "bytes")
 ```
 
 ---
 
-## 🯩 Advanced Example — Using Templates and Inline Images
+## 🗑️ Managing Emails
 
 ```python
-ez = EzSender(
+with EzReader(imap, account) as reader:
+    emails = reader.fetch_unread(limit=1)
+    if emails:
+        mail = emails[0]
+        reader.move_to_trash(mail)   # Move to Trash
+        reader.empty_trash()         # Empty Trash
+```
+
+---
+
+## 🯩 Advanced Example — HTML Templates & Inline Images
+
+```python
+from ezmail import EzSender
+
+with EzSender(
     smtp={"server": "smtp.domain.com", "port": 587},
     sender={"email": "me@domain.com", "password": "mypassword"}
-)
-
-ez.subject = "Welcome to our platform!"
-ez.use_template("templates/welcome.html", name="John", version="3.2.1")
-ez.add_image("logo.png", width="150px", cid="logo_img")
-ez.send("john@client.com")
+) as ez:
+    ez.subject = "Welcome to our platform!"
+    ez.use_template("templates/welcome.html", name="John", version="3.2.1")
+    ez.add_image("logo.png", width="150px", cid="logo_img")
+    ez.send("john@client.com")
 ```
 
 ---
@@ -113,22 +132,22 @@ ez.send("john@client.com")
 ## 🔐 Authentication Methods
 
 | Method     | Description                                                                     |
-| ---------- | ------------------------------------------------------------------------------- |
-| `password` | Standard login using email and password (supports app-specific passwords).      |
-| `oauth2`   | Secure OAuth2 token authentication — required for Gmail and Microsoft accounts. |
+| ----------- | ------------------------------------------------------------------------------ |
+| `password` | Standard login using email and password (supports app passwords).               |
+| `oauth2`   | Secure OAuth2 token authentication (used by Gmail, Outlook, etc.).              |
 
 ---
 
 ## 📦 Dependencies
 
-* [Jinja2](https://pypi.org/project/Jinja2/) ≥ 3.0.0 (for HTML templates)
-* Built-in modules only: `smtplib`, `imaplib`, `email`, `mimetypes`, `uuid`, etc.
+* [Jinja2](https://pypi.org/project/Jinja2/) ≥ 3.0.0  
+* Built-in Python modules: `smtplib`, `imaplib`, `email`, `mimetypes`, `uuid`, `base64`, etc.
 
 ---
 
 ## 🧮 Requirements
 
-* Python ≥ 3.8
+* Python ≥ 3.8  
 * Internet access (for SMTP/IMAP servers)
 
 ---
