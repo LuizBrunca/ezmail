@@ -1,7 +1,7 @@
 from imaplib import IMAP4_SSL
 from email import message_from_bytes
-from email.header import decode_header
 from email.utils import parsedate_to_datetime
+from email.header import decode_header, Header
 from base64 import b64encode
 from typing import List, Dict, Any
 from datetime import datetime
@@ -229,6 +229,33 @@ class EzReader:
             >>> emails = reader.fetch_messages(status="UNSEEN")
             >>> print(len(emails))
         """
+        
+        def safe_decode(value, encoding=None):
+            """Decodifica bytes ou headers MIME de forma segura."""
+            if not value:
+                return ""
+            if isinstance(value, Header):
+                value = str(value)
+            if isinstance(value, bytes):
+                try:
+                    return value.decode(encoding or "utf-8", errors="ignore")
+                except LookupError:
+                    return value.decode("utf-8", errors="ignore")
+            try:
+                parts = decode_header(value)
+                decoded = ""
+                for text, enc in parts:
+                    if isinstance(text, bytes):
+                        try:
+                            decoded += text.decode(enc or "utf-8", errors="ignore")
+                        except LookupError:
+                            decoded += text.decode("utf-8", errors="ignore")
+                    else:
+                        decoded += text
+                return decoded
+            except Exception:
+                return str(value)
+
         if not self.mail:
             raise RuntimeError("Not connected to any IMAP server.")
 
@@ -276,31 +303,38 @@ class EzReader:
 
                 msg = message_from_bytes(msg_data[0][1])
 
-                # Subject
-                subject_raw, enc = decode_header(msg.get("Subject", ""))[0]
-                subject_decoded = subject_raw.decode(enc or "utf-8", errors="ignore") if isinstance(subject_raw, bytes) else subject_raw
-
-                sender_decoded = msg.get("From", "")
-                body_content, attachments = "", []
-
+                # --- Decodificação segura dos cabeçalhos ---
+                subject_decoded = safe_decode(msg.get("Subject", ""))
+                sender_decoded = safe_decode(msg.get("From", ""))
                 raw_date = msg.get("Date")
+
                 try:
                     email_date = parsedate_to_datetime(raw_date) if raw_date else None
                 except Exception:
                     email_date = None
 
+                # --- Corpo e anexos ---
+                body_content = ""
+                attachments = []
+
                 for part in msg.walk():
                     content_disposition = str(part.get("Content-Disposition", "")).lower()
                     content_type = part.get_content_type()
+
                     if part.is_multipart():
                         continue
+
+                    # Texto simples (ignora HTML e anexos)
                     if content_type == "text/plain" and "attachment" not in content_disposition:
                         try:
                             body_content = part.get_payload(decode=True).decode(errors="ignore")
                         except Exception:
                             pass
+
+                    # Anexos
                     filename = part.get_filename()
                     if filename:
+                        filename = safe_decode(filename)
                         try:
                             file_data = part.get_payload(decode=True)
                             attachments.append({
@@ -314,11 +348,12 @@ class EzReader:
                 emails.append(EzMail(
                     uid=uid_str,
                     sender=sender_decoded,
-                    subject=subject_decoded,
-                    body=body_content.strip(),
+                    subject=subject_decoded or "(Sem assunto)",
+                    body=(body_content or "").strip(),
                     attachments=attachments,
                     date=email_date
                 ))
+
             return emails
 
         except Exception as e:
