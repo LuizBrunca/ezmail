@@ -194,6 +194,7 @@ class EzReader:
         date: datetime | None = None,
         since: datetime | None = None,
         before: datetime | None = None,
+        uids: list[str] | None = None
     ) -> List[EzMail]:
         """Search and fetch messages with flexible IMAP filters.
 
@@ -283,17 +284,21 @@ class EzReader:
         try:
             self.mail.select(mailbox)
 
-            # UID search (reliable across expunges)
-            status_code, data = self.mail.uid("SEARCH", None, criteria)
-            if status_code != "OK":
-                raise RuntimeError(f"Failed to search emails with criteria: {criteria}")
-
-            uids = (data[0] or b"").split()
-            if limit:
-                uids = uids[:limit]
+            if uids:
+                # Busca direta pelos UIDs informados
+                search_uids = [uid.encode() for uid in uids]
+            else:
+                # Busca normal com critérios IMAP
+                status_code, data = self.mail.uid("SEARCH", None, criteria)
+                if status_code != "OK":
+                    raise RuntimeError(f"Failed to search emails with criteria: {criteria}")
+                search_uids = (data[0] or b"").split()
+                
+            if limit and not uids:
+                search_uids = search_uids[:limit]
 
             emails = []
-            for uid in uids:
+            for uid in search_uids:
                 uid_str = uid.decode()
 
                 # Do not set \Seen bit
