@@ -95,7 +95,7 @@ class EzSender:
             if self.smtp_port == 465:
                 smtp = SMTP_SSL(self.smtp_server, self.smtp_port, timeout=30)
             else:
-                smtp = SMTP(self.smtp_server, self.smtp_port, timeout=30)
+                smtp = SMTP(self.smtp_server, self.smtp_port, timeout=30) # type: ignore
                 smtp.ehlo()
                 smtp.starttls()
                 smtp.ehlo()
@@ -275,11 +275,11 @@ class EzSender:
                                 if main_type == "text":
                                     mime_attachment = MIMEText(f.read().decode("utf-8", errors="ignore"), _subtype=sub_type)
                                 elif main_type == "image":
-                                    mime_attachment = MIMEImage(f.read(), _subtype=sub_type)
+                                    mime_attachment = MIMEImage(f.read(), _subtype=sub_type) # type: ignore
                                 elif main_type == "audio":
-                                    mime_attachment = MIMEAudio(f.read(), _subtype=sub_type)
+                                    mime_attachment = MIMEAudio(f.read(), _subtype=sub_type) # type: ignore
                                 else:
-                                    mime_attachment = MIMEApplication(f.read(), _subtype=sub_type)
+                                    mime_attachment = MIMEApplication(f.read(), _subtype=sub_type) # type: ignore
 
                                 mime_attachment.add_header("Content-Disposition", "attachment", filename=file_name)
                                 message.attach(mime_attachment)

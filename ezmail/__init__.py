@@ -37,5 +37,5 @@ from .ezsender import EzSender
 from .ezreader import EzReader
 from .ezmail import EzMail
 
-__version__ = "2.3.5"
+__version__ = "2.3.6"
 __all__ = ["EzSender", "EzReader", "EzMail", "__version__"]

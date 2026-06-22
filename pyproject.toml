@@ -4,19 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py-ezmail"
-version = "2.3.5"
+version = "2.3.6"
 description = "Send and read emails easily — with attachments, inline images, IMAP management, and OAuth2 authentication."
 readme = "README.md"
 authors = [
     { name = "Luiz Henrique Brunca", email = "luizhenriquebrunca@gmail.com" }
 ]
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.8"
 keywords = ["email", "smtp", "imap", "html", "oauth2", "automation", "brunca", "ezmail", "attachments"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
