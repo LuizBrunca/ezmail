@@ -1,10 +1,21 @@
+from __future__ import annotations
+
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import Any
+
 
 class EzMail:
     """Represents an email message retrieved by EzReader."""
 
-    def __init__(self, uid: int, sender: str, subject: str, body: str, attachments: List[Dict[str, Any]] | None = None, date: datetime | None = None):
+    def __init__(
+        self,
+        uid: str,
+        sender: str,
+        subject: str,
+        body: str,
+        attachments: list[dict[str, Any]] | None = None,
+        date: datetime | None = None,
+    ):
         self.uid = uid
         self.sender = sender
         self.subject = subject
@@ -21,3 +32,6 @@ class EzMail:
 
     def __repr__(self) -> str:
         return f"<EzMail uid={self.uid} from={self.sender!r} subject={self.subject!r} attachments={len(self.attachments)}>"
+
+    def __str__(self) -> str:
+        return f"[{self.uid}] {self.subject!r} from {self.sender}"

@@ -1,12 +1,17 @@
+from __future__ import annotations
+
+import logging
 from imaplib import IMAP4_SSL
 from email import message_from_bytes
 from email.utils import parsedate_to_datetime
-from email.header import decode_header, Header
 from base64 import b64encode
-from typing import List, Dict, Any
+from typing import Any
 from datetime import datetime
-from .utils import validate_protocol_config, validate_account, validate_date
+
+from .utils import validate_protocol_config, validate_account, validate_date, _safe_decode
 from .ezmail import EzMail
+
+_logger = logging.getLogger(__name__)
 
 
 class EzReader:
@@ -61,7 +66,7 @@ class EzReader:
         self.connect()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, _exc_type, _exc_value, _traceback):
         """Ensure IMAP disconnection when leaving the context."""
         self.disconnect()
 
@@ -84,22 +89,20 @@ class EzReader:
         Authenticates with either password or OAuth2 depending on `auth_type`.
 
         Raises:
-            RuntimeError: On connection/authentication failure.
             ValueError: If `auth_type` is not "password" or "oauth2".
+            RuntimeError: On connection or authentication failure.
         """
+        if self.auth_type not in ("password", "oauth2"):
+            raise ValueError("Invalid authentication type. Use 'password' or 'oauth2'.")
         try:
             self.mail = IMAP4_SSL(self.imap_server, self.imap_port)
-
             if self.auth_type == "password":
                 self.mail.login(self.user_email, self.auth_value)
-            elif self.auth_type == "oauth2":
+            else:
                 auth_string = self._generate_oauth2_string(self.user_email, self.auth_value)
                 self.mail.authenticate("XOAUTH2", lambda x: auth_string)
-            else:
-                raise ValueError("Invalid authentication type. Use 'password' or 'oauth2'.")
-
         except Exception as e:
-            raise RuntimeError(f"Failed to connect or authenticate to IMAP server: {e}")
+            raise RuntimeError(f"Failed to connect or authenticate to IMAP server: {e}") from e
 
     def disconnect(self) -> None:
         """Close the IMAP connection safely."""
@@ -109,11 +112,11 @@ class EzReader:
         except Exception:
             pass
 
-    def list_mailboxes(self) -> List[str]:
+    def list_mailboxes(self) -> list[str]:
         """List all available mailboxes (folders).
 
         Returns:
-            List[str]: Mailbox names as returned by the server (decoded).
+            list[str]: Mailbox names as returned by the server (decoded).
 
         Raises:
             RuntimeError: If not connected or unable to list mailboxes.
@@ -127,7 +130,7 @@ class EzReader:
                 raise RuntimeError("Unable to retrieve mailbox list.")
             return [box.decode().split(' "/" ')[-1] for box in mailboxes]
         except Exception as e:
-            raise RuntimeError(f"Failed to list mailboxes: {e}")
+            raise RuntimeError(f"Failed to list mailboxes: {e}") from e
 
     def _quote_mailbox(self, name: str) -> str:
         """Quote a mailbox name if it contains special characters.
@@ -194,8 +197,8 @@ class EzReader:
         date: datetime | None = None,
         since: datetime | None = None,
         before: datetime | None = None,
-        uids: list[str] | None = None
-    ) -> List[EzMail]:
+        uids: list[str] | None = None,
+    ) -> list[EzMail]:
         """Search and fetch messages with flexible IMAP filters.
 
         Performs a UID-based search in the selected mailbox and fetches
@@ -213,9 +216,10 @@ class EzReader:
             date (datetime | None, optional): Exact date to match (ON).
             since (datetime | None, optional): Lower bound date (SINCE).
             before (datetime | None, optional): Upper bound (exclusive) date (BEFORE).
+            uids (list[str] | None, optional): Fetch specific UIDs directly, bypassing search.
 
         Returns:
-            List[EzMail]: Messages with:
+            list[EzMail]: Messages with:
                 - uid (str): IMAP UID.
                 - sender (str): Raw "From" header.
                 - subject (str): Decoded subject.
@@ -230,33 +234,6 @@ class EzReader:
             >>> emails = reader.fetch_messages(status="UNSEEN")
             >>> print(len(emails))
         """
-        
-        def safe_decode(value, encoding=None):
-            """Decodifica bytes ou headers MIME de forma segura."""
-            if not value:
-                return ""
-            if isinstance(value, Header):
-                value = str(value)
-            if isinstance(value, bytes):
-                try:
-                    return value.decode(encoding or "utf-8", errors="ignore")
-                except LookupError:
-                    return value.decode("utf-8", errors="ignore")
-            try:
-                parts = decode_header(value)
-                decoded = ""
-                for text, enc in parts:
-                    if isinstance(text, bytes):
-                        try:
-                            decoded += text.decode(enc or "utf-8", errors="ignore")
-                        except LookupError:
-                            decoded += text.decode("utf-8", errors="ignore")
-                    else:
-                        decoded += text
-                return decoded
-            except Exception:
-                return str(value)
-
         if not self.mail:
             raise RuntimeError("Not connected to any IMAP server.")
 
@@ -282,18 +259,18 @@ class EzReader:
         criteria += ")"
 
         try:
-            self.mail.select(mailbox)
+            status_select, _ = self.mail.select(mailbox)
+            if status_select != "OK":
+                raise RuntimeError(f"Failed to select mailbox '{mailbox}'.")
 
             if uids:
-                # Busca direta pelos UIDs informados
                 search_uids = [uid.encode() for uid in uids]
             else:
-                # Busca normal com critérios IMAP
                 status_code, data = self.mail.uid("SEARCH", None, criteria)
                 if status_code != "OK":
                     raise RuntimeError(f"Failed to search emails with criteria: {criteria}")
                 search_uids = (data[0] or b"").split()
-                
+
             if limit and not uids:
                 search_uids = search_uids[:limit]
 
@@ -301,16 +278,15 @@ class EzReader:
             for uid in search_uids:
                 uid_str = uid.decode()
 
-                # Do not set \Seen bit
+                # Do not set \Seen flag while fetching
                 status_fetch, msg_data = self.mail.uid("FETCH", uid_str, "(BODY.PEEK[])")
                 if status_fetch != "OK" or not msg_data or not msg_data[0]:
                     continue
 
                 msg = message_from_bytes(msg_data[0][1])
 
-                # --- Decodificação segura dos cabeçalhos ---
-                subject_decoded = safe_decode(msg.get("Subject", ""))
-                sender_decoded = safe_decode(msg.get("From", ""))
+                subject_decoded = _safe_decode(msg.get("Subject", ""))
+                sender_decoded = _safe_decode(msg.get("From", ""))
                 raw_date = msg.get("Date")
 
                 try:
@@ -318,9 +294,8 @@ class EzReader:
                 except Exception:
                     email_date = None
 
-                # --- Corpo e anexos ---
                 body_content = ""
-                attachments = []
+                attachments: list[dict[str, Any]] = []
 
                 for part in msg.walk():
                     content_disposition = str(part.get("Content-Disposition", "")).lower()
@@ -329,17 +304,15 @@ class EzReader:
                     if part.is_multipart():
                         continue
 
-                    # Texto simples (ignora HTML e anexos)
                     if content_type == "text/plain" and "attachment" not in content_disposition:
                         try:
                             body_content = part.get_payload(decode=True).decode(errors="ignore")
                         except Exception:
                             pass
 
-                    # Anexos
                     filename = part.get_filename()
                     if filename:
-                        filename = safe_decode(filename)
+                        filename = _safe_decode(filename)
                         try:
                             file_data = part.get_payload(decode=True)
                             attachments.append({
@@ -353,18 +326,18 @@ class EzReader:
                 emails.append(EzMail(
                     uid=uid_str,
                     sender=sender_decoded,
-                    subject=subject_decoded or "(Sem assunto)",
+                    subject=subject_decoded or "(No subject)",
                     body=(body_content or "").strip(),
                     attachments=attachments,
-                    date=email_date
+                    date=email_date,
                 ))
 
             return emails
 
         except Exception as e:
-            raise RuntimeError(f"Failed to fetch emails with the criteria {criteria}: {e}")
+            raise RuntimeError(f"Failed to fetch emails with the criteria {criteria}: {e}") from e
 
-    def fetch_unread(self, mailbox: str = "INBOX", limit: int | None = None) -> List[EzMail]:
+    def fetch_unread(self, mailbox: str = "INBOX", limit: int | None = None) -> list[EzMail]:
         """Convenience method to fetch unread messages.
 
         Args:
@@ -372,7 +345,7 @@ class EzReader:
             limit (int | None): Optional maximum number of messages.
 
         Returns:
-            List[EzMail]: Unread messages as `EzMail` objects.
+            list[EzMail]: Unread messages as `EzMail` objects.
 
         Raises:
             RuntimeError: If not connected or on fetch errors.
@@ -397,15 +370,14 @@ class EzReader:
 
         try:
             self.mail.select(mailbox)
-            uid = email.uid
-            status, _ = self.mail.uid("STORE", str(uid), "-FLAGS", "(\\Seen)")
+            status, _ = self.mail.uid("STORE", str(email.uid), "-FLAGS", "(\\Seen)")
             if status != "OK":
                 raise RuntimeError(f"Failed to mark message {email} as unread.")
             return True
         except Exception as e:
-            print(f"❌ Error marking email {email} as unread: {e}")
+            _logger.warning("Error marking email %s as unread: %s", email, e)
             return False
-    
+
     def mark_as_read(self, email: EzMail, mailbox: str = "INBOX") -> bool:
         """Set the ``\\Seen`` flag (mark message as read).
 
@@ -429,13 +401,12 @@ class EzReader:
 
         try:
             self.mail.select(mailbox)
-            uid = str(email.uid)
-            status, _ = self.mail.uid("STORE", uid, "+FLAGS", "(\\Seen)")
+            status, _ = self.mail.uid("STORE", str(email.uid), "+FLAGS", "(\\Seen)")
             if status != "OK":
                 raise RuntimeError(f"Failed to mark message {email} as read.")
             return True
         except Exception as e:
-            print(f"❌ Error marking email {email} as read: {e}")
+            _logger.warning("Error marking email %s as read: %s", email, e)
             return False
 
     def move_email(self, email: EzMail, destination: str, mailbox: str = "INBOX") -> bool:
@@ -474,7 +445,7 @@ class EzReader:
                 self.mail.expunge()
             return True
         except Exception as e:
-            print(f"❌ Error moving email {email} to {destination}: {e}")
+            _logger.warning("Error moving email %s to %s: %s", email, destination, e)
             return False
 
     def get_trash_folder(self) -> str:
@@ -487,7 +458,7 @@ class EzReader:
           4) Common hierarchy fallback ("INBOX.Trash").
 
         Returns:
-            str: The best candidate mailbox name for Trash (server’s native name).
+            str: The best candidate mailbox name for Trash (server's native name).
 
         Raises:
             RuntimeError: If not connected or listing fails.
@@ -561,7 +532,7 @@ class EzReader:
             return self.move_email(email, destination=trash_folder, mailbox=mailbox)
 
         except Exception as e:
-            print(f"❌ Error moving email {email} to Trash: {e}")
+            _logger.warning("Error moving email %s to Trash: %s", email, e)
             return False
 
     def empty_folder(self, mailbox: str) -> bool:
@@ -590,7 +561,7 @@ class EzReader:
             self.mail.expunge()
             return True
         except Exception as e:
-            print(f"❌ Error emptying folder '{mailbox}': {e}")
+            _logger.warning("Error emptying folder '%s': %s", mailbox, e)
             return False
 
     def empty_trash(self) -> bool:
@@ -611,7 +582,7 @@ class EzReader:
             trash_folder = self.get_trash_folder()
             return self.empty_folder(trash_folder)
         except Exception as e:
-            print(f"❌ Error emptying Trash folder: {e}")
+            _logger.warning("Error emptying Trash folder: %s", e)
             return False
 
     def delete_email(self, email: EzMail, mailbox: str = "INBOX") -> bool:
@@ -635,12 +606,11 @@ class EzReader:
 
         try:
             self.mail.select(mailbox)
-            uid = email.uid
-            status, _ = self.mail.uid("STORE", str(uid), "+FLAGS", "(\\Deleted)")
+            status, _ = self.mail.uid("STORE", str(email.uid), "+FLAGS", "(\\Deleted)")
             if status != "OK":
                 raise RuntimeError(f"Failed to mark message {email} as deleted.")
             self.mail.expunge()
             return True
         except Exception as e:
-            print(f"❌ Error deleting email {email}: {e}")
+            _logger.warning("Error deleting email %s: %s", email, e)
             return False

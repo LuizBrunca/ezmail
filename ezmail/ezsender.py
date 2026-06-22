@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from smtplib import SMTP, SMTP_SSL
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -10,7 +12,6 @@ from os.path import isfile, basename
 from re import sub
 from jinja2 import Template
 from time import sleep
-from typing import Union, List
 from .utils import validate_template, validate_image, validate_path, validate_sender, validate_protocol_config
 
 
@@ -71,7 +72,7 @@ class EzSender:
         self._smtp_conn = self.connect()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, _exc_type, _exc_value, _traceback):
         """Ensure SMTP disconnection when leaving the context."""
         try:
             if hasattr(self, "_smtp_conn") and self._smtp_conn:
@@ -79,25 +80,29 @@ class EzSender:
         except Exception:
             pass
 
-    def connect(self) -> Union[SMTP, SMTP_SSL]:
+    def connect(self) -> SMTP | SMTP_SSL:
         """Establish an authenticated SMTP connection.
 
-        Automatically chooses STARTTLS for most ports (e.g., 587) and SSL for 465.
+        Uses implicit SSL for port 465 and STARTTLS for all other ports.
 
         Returns:
-            Union[SMTP, SMTP_SSL]: Authenticated SMTP connection object.
+            SMTP | SMTP_SSL: Authenticated SMTP connection object.
 
         Raises:
             RuntimeError: If connection or authentication fails.
         """
-        conn_class = SMTP if self.smtp_port == 587 else SMTP_SSL
-        smtp = conn_class(self.smtp_server, self.smtp_port, timeout=30)
-
-        if self.smtp_port != 465:
-            smtp.starttls()
-
-        smtp.login(self.sender_email, self.sender_password)
-        return smtp
+        try:
+            if self.smtp_port == 465:
+                smtp = SMTP_SSL(self.smtp_server, self.smtp_port, timeout=30)
+            else:
+                smtp = SMTP(self.smtp_server, self.smtp_port, timeout=30)
+                smtp.ehlo()
+                smtp.starttls()
+                smtp.ehlo()
+            smtp.login(self.sender_email, self.sender_password)
+            return smtp
+        except Exception as e:
+            raise RuntimeError(f"Failed to connect to SMTP server '{self.smtp_server}': {e}") from e
 
     def add_text(self, html: str) -> None:
         """Append plain text or HTML content to the message body.
@@ -234,7 +239,6 @@ class EzSender:
         result: dict = {"sent": [], "failed": {}}
 
         try:
-            # Reuse existing connection if present; otherwise create a new one.
             smtp = getattr(self, "_smtp_conn", None) or self.connect()
             close_after = not hasattr(self, "_smtp_conn")
 
@@ -248,7 +252,6 @@ class EzSender:
                     message["To"] = recipient
                     message["Subject"] = self.subject or ""
 
-                    # Plain + HTML alternative
                     alt = MIMEMultipart("alternative")
                     plain_text = sub(r"<[^>]+>", "", unified_body)
                     plain_text = sub(r"\s+", " ", plain_text).strip() or "Content not available."
@@ -257,11 +260,9 @@ class EzSender:
                     alt.attach(MIMEText(unified_body, "html"))
                     message.attach(alt)
 
-                    # Inline images
                     for img in inline_images:
                         message.attach(img)
 
-                    # Attachments
                     for attachment_path in self.attachments:
                         if isfile(attachment_path):
                             with open(attachment_path, "rb") as f:
@@ -287,8 +288,7 @@ class EzSender:
                     result["sent"].append(recipient)
                     emails_sent += 1
 
-                    # Optional throttle
-                    if self.max_emails_per_hour and emails_sent == self.max_emails_per_hour:
+                    if self.max_emails_per_hour and emails_sent % self.max_emails_per_hour == 0:
                         sleep(3600)
 
                 except Exception as e:
@@ -298,6 +298,6 @@ class EzSender:
                 smtp.quit()
 
         except Exception as e:
-            raise RuntimeError(f"Failed to prepare or send email: {e}")
+            raise RuntimeError(f"Failed to prepare or send email: {e}") from e
 
         return result

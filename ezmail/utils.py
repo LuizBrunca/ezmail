@@ -1,5 +1,43 @@
+from __future__ import annotations
+
 from os.path import isfile
 from datetime import datetime
+from email.header import decode_header, Header
+
+
+def _safe_decode(value, encoding: str | None = None) -> str:
+    """Safely decode a bytes value or MIME-encoded header string.
+
+    Args:
+        value: Bytes, str, or Header object to decode.
+        encoding (str | None): Optional encoding hint for bytes values.
+
+    Returns:
+        str: Decoded string, falling back to UTF-8 with errors ignored.
+    """
+    if not value:
+        return ""
+    if isinstance(value, Header):
+        value = str(value)
+    if isinstance(value, bytes):
+        try:
+            return value.decode(encoding or "utf-8", errors="ignore")
+        except LookupError:
+            return value.decode("utf-8", errors="ignore")
+    try:
+        parts = decode_header(value)
+        decoded = ""
+        for text, enc in parts:
+            if isinstance(text, bytes):
+                try:
+                    decoded += text.decode(enc or "utf-8", errors="ignore")
+                except LookupError:
+                    decoded += text.decode("utf-8", errors="ignore")
+            else:
+                decoded += text
+        return decoded
+    except Exception:
+        return str(value)
 
 
 def validate_path(path: str) -> None:
@@ -54,6 +92,7 @@ def validate_image(image_path: str) -> None:
     """
     validate_path(image_path)
 
+
 def validate_protocol_config(protocol_config: dict) -> None:
     """Validates whether the provided protocol configuration dictionary is valid.
 
@@ -76,6 +115,7 @@ def validate_protocol_config(protocol_config: dict) -> None:
     if not protocol_config.get("server") or not protocol_config.get("port"):
         raise ValueError("The keys 'server' and 'port' must be provided.")
 
+
 def validate_sender(sender: dict) -> None:
     """Validates whether the provided sender credentials dictionary is valid.
 
@@ -96,6 +136,7 @@ def validate_sender(sender: dict) -> None:
 
     if not sender.get("email") or not sender.get("password"):
         raise ValueError("The keys 'email' and 'password' must be provided.")
+
 
 def validate_account(account: dict) -> None:
     """Validates whether the provided account credentials dictionary is valid.
@@ -119,6 +160,18 @@ def validate_account(account: dict) -> None:
     if not account.get("email") or not account.get("auth_value") or not account.get("auth_type"):
         raise ValueError("The keys 'email', 'auth_value' and 'auth_type' must be provided.")
 
-def validate_date(date):
+
+def validate_date(date: datetime) -> None:
+    """Validate that the provided value is a datetime object.
+
+    Args:
+        date: Value to validate.
+
+    Raises:
+        ValueError: If the value is not a datetime instance.
+
+    Example:
+        validate_date(datetime(2024, 1, 1))
+    """
     if not isinstance(date, datetime):
         raise ValueError("The date must be a datetime object.")
