@@ -19,7 +19,7 @@ Example:
     sender = {"email": "me@domain.com", "password": "secret"}
 
     with EzSender(smtp, sender) as ez:
-        ez.subject = "Hello!"
+        ez.set_subject("Hello!")
         ez.add_text("<p>This is a test email.</p>")
         ez.send("recipient@domain.com")
 
@@ -37,5 +37,5 @@ from .ezsender import EzSender
 from .ezreader import EzReader
 from .ezmail import EzMail
 
-__version__ = "2.3.6"
+__version__ = "2.5.0"
 __all__ = ["EzSender", "EzReader", "EzMail", "__version__"]

@@ -162,12 +162,39 @@ class EzSender:
         validate_path(attachment_path)
         self.attachments.append(attachment_path)
 
+    def set_subject(self, subject: str) -> None:
+        """Validate and set the email subject.
+
+        Args:
+            subject (str): The subject line to set.
+
+        Raises:
+            ValueError: If the subject is not a string, is blank, contains
+                newline characters (header injection risk), or exceeds 255 characters.
+        """
+        if not isinstance(subject, str):
+            raise ValueError("Subject must be a string.")
+        subject = subject.strip()
+        if not subject:
+            raise ValueError("Subject must not be empty or whitespace.")
+        if any(c in subject for c in ("\n", "\r")):
+            raise ValueError("Subject must not contain newline characters.")
+        if len(subject) > 255:
+            raise ValueError("Subject must not exceed 255 characters.")
+        self.subject = subject
+
     def clear_body(self) -> None:
         """Remove all accumulated body content (keeps SMTP state)."""
         self.body = []
 
     def clear_attachments(self) -> None:
         """Remove all queued attachments."""
+        self.attachments = []
+
+    def reset(self) -> None:
+        """Clear subject, body, and attachments for reuse within the same session."""
+        self.subject = None
+        self.body = []
         self.attachments = []
 
     def _build_body(self) -> tuple[str, list[MIMEImage]]:
@@ -214,16 +241,69 @@ class EzSender:
         unified_body = "".join(html_parts)
         return unified_body, inline_images
 
-    def send(self, recipients: str | list[str]) -> dict:
+    def _build_message(self, to_header: str, unified_body: str, inline_images: list) -> MIMEMultipart:
+        """Assemble a complete MIME message ready to send.
+
+        Args:
+            to_header (str): Value for the To: header (single address or comma-joined list).
+            unified_body (str): Final HTML body string.
+            inline_images (list[MIMEImage]): Inline images already prepared with headers.
+
+        Returns:
+            MIMEMultipart: Fully assembled MIME message.
+        """
+        message = MIMEMultipart("mixed")
+        message["From"] = self.sender_email
+        message["To"] = to_header
+        message["Subject"] = self.subject or ""
+
+        alt = MIMEMultipart("alternative")
+        plain_text = sub(r"<[^>]+>", "", unified_body)
+        plain_text = sub(r"\s+", " ", plain_text).strip() or "Content not available."
+
+        alt.attach(MIMEText(plain_text, "plain"))
+        alt.attach(MIMEText(unified_body, "html"))
+        message.attach(alt)
+
+        for img in inline_images:
+            message.attach(img)
+
+        for attachment_path in self.attachments:
+            if isfile(attachment_path):
+                with open(attachment_path, "rb") as f:
+                    file_name = basename(attachment_path)
+                    mime_type, _ = guess_type(attachment_path)
+                    main_type, sub_type = (
+                        mime_type.split("/", 1) if mime_type else ("application", "octet-stream")
+                    )
+
+                    if main_type == "text":
+                        mime_attachment = MIMEText(f.read().decode("utf-8", errors="ignore"), _subtype=sub_type)
+                    elif main_type == "image":
+                        mime_attachment = MIMEImage(f.read(), _subtype=sub_type) # type: ignore
+                    elif main_type == "audio":
+                        mime_attachment = MIMEAudio(f.read(), _subtype=sub_type) # type: ignore
+                    else:
+                        mime_attachment = MIMEApplication(f.read(), _subtype=sub_type) # type: ignore
+
+                    mime_attachment.add_header("Content-Disposition", "attachment", filename=file_name)
+                    message.attach(mime_attachment)
+
+        return message
+
+    def send(self, recipients: str | list[str], broadcast: bool = False) -> dict:
         """Compose and send the prepared message to one or multiple recipients.
 
         Builds a MIME message (multipart/mixed with a multipart/alternative part),
-        attaches inline images and files, and sends per-recipient. When used as a
+        attaches inline images and files, and sends the email. When used as a
         context manager, reuses the existing SMTP connection; otherwise, creates
         and closes a new connection around the operation.
 
         Args:
             recipients (str | list[str]): Single email or list of emails.
+            broadcast (bool): If True, sends one email with all recipients visible
+                in the To: header (group send). If False (default), sends individual
+                emails so each recipient sees only their own address.
 
         Returns:
             dict: A summary with:
@@ -243,56 +323,30 @@ class EzSender:
             close_after = not hasattr(self, "_smtp_conn")
 
             unified_body, inline_images = self._build_body()
-            emails_sent = 0
 
-            for recipient in recipients:
+            if broadcast:
                 try:
-                    message = MIMEMultipart("mixed")
-                    message["From"] = self.sender_email
-                    message["To"] = recipient
-                    message["Subject"] = self.subject or ""
-
-                    alt = MIMEMultipart("alternative")
-                    plain_text = sub(r"<[^>]+>", "", unified_body)
-                    plain_text = sub(r"\s+", " ", plain_text).strip() or "Content not available."
-
-                    alt.attach(MIMEText(plain_text, "plain"))
-                    alt.attach(MIMEText(unified_body, "html"))
-                    message.attach(alt)
-
-                    for img in inline_images:
-                        message.attach(img)
-
-                    for attachment_path in self.attachments:
-                        if isfile(attachment_path):
-                            with open(attachment_path, "rb") as f:
-                                file_name = basename(attachment_path)
-                                mime_type, _ = guess_type(attachment_path)
-                                main_type, sub_type = (
-                                    mime_type.split("/", 1) if mime_type else ("application", "octet-stream")
-                                )
-
-                                if main_type == "text":
-                                    mime_attachment = MIMEText(f.read().decode("utf-8", errors="ignore"), _subtype=sub_type)
-                                elif main_type == "image":
-                                    mime_attachment = MIMEImage(f.read(), _subtype=sub_type) # type: ignore
-                                elif main_type == "audio":
-                                    mime_attachment = MIMEAudio(f.read(), _subtype=sub_type) # type: ignore
-                                else:
-                                    mime_attachment = MIMEApplication(f.read(), _subtype=sub_type) # type: ignore
-
-                                mime_attachment.add_header("Content-Disposition", "attachment", filename=file_name)
-                                message.attach(mime_attachment)
-
-                    smtp.sendmail(self.sender_email, [recipient], message.as_string())
-                    result["sent"].append(recipient)
-                    emails_sent += 1
-
-                    if self.max_emails_per_hour and emails_sent % self.max_emails_per_hour == 0:
-                        sleep(3600)
-
+                    to_header = ", ".join(recipients)
+                    message = self._build_message(to_header, unified_body, inline_images)
+                    smtp.sendmail(self.sender_email, list(recipients), message.as_string())
+                    result["sent"].extend(recipients)
                 except Exception as e:
-                    result["failed"][recipient] = str(e)
+                    for recipient in recipients:
+                        result["failed"][recipient] = str(e)
+            else:
+                emails_sent = 0
+                for recipient in recipients:
+                    try:
+                        message = self._build_message(recipient, unified_body, inline_images)
+                        smtp.sendmail(self.sender_email, [recipient], message.as_string())
+                        result["sent"].append(recipient)
+                        emails_sent += 1
+
+                        if self.max_emails_per_hour and emails_sent % self.max_emails_per_hour == 0:
+                            sleep(3600)
+
+                    except Exception as e:
+                        result["failed"][recipient] = str(e)
 
             if close_after:
                 smtp.quit()
